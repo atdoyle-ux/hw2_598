@@ -14,7 +14,7 @@ from QNN import NeuralNetwork
 
 
 # ======== always-on script (no argparse) ========
-BASE_EPISODES     = 1000
+BASE_EPISODES     = 2000
 TEST_EPISODES     = 20
 HIDDEN_SIZE       = 128      # QNN.NeuralNetwork(h_size=...)
 BASE_LR           = 1e-3
@@ -24,7 +24,7 @@ PENALTY           = -1.0
 START_STATE       = (0, 0)
 MAX_STEPS         = 50       # hard cap per episode (as requested)
 
-LR_SWEEP          = [1e-2, 1e-3, 1e-5]
+LR_SWEEP          = [1e-1, 1e-3, 1e-5]
 BATCH_SWEEP       = [8, 32, 256]
 GAMMA_SWEEP       = [0.99, 0.95, 0.5]
 # =================================================
@@ -44,7 +44,7 @@ def to_2d_state_vec(state: Tuple[int, int], rows: int, cols: int) -> np.ndarray:
     return np.array([r_norm, c_norm], dtype=np.float32)
 
 
-# ---------- plotting helpers (cleaner figs) ----------
+
 def _smooth_ma(y, frac: float = 0.015) -> np.ndarray:
     """Moving average; window = ~1.5% of length, clamped to [5, 200]."""
     y = np.asarray(y, dtype=float)
@@ -62,7 +62,7 @@ def _pretty_axes(ax, title: str, xlabel: str = "Episode", ylabel: str = "Return"
     ax.set_xlabel(xlabel, fontsize=11)
     ax.set_ylabel(ylabel, fontsize=11)
     ax.grid(True, alpha=0.3, linewidth=0.8)
-# -----------------------------------------------------
+
 
 
 @dataclass
