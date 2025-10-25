@@ -2,10 +2,9 @@ import torch
 import torch.nn as nn
 
 class NeuralNetwork(nn.Module):
-    def __init__(self):
+    def __init__(self,h_size):
         super().__init__()
         in_size = 2
-        h_size = 1024
         out_size = 4
         self.network = nn.Sequential(
             nn.Linear(in_size, h_size),

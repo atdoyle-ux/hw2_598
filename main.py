@@ -39,7 +39,7 @@ class DQNConfig:
     gamma: float = 0.99
     lr: float = 1e-3
     batch_size: int = 64
-    replay_size: int = 100000
+    replay_size: int = 10000
     min_replay: int = 500
     epsilon_start: float = 1.0
     epsilon_end: float = 0.05
