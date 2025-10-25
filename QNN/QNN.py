@@ -13,5 +13,5 @@ class NeuralNetwork(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x expected shape: [B, 2] (row, col) normalized to [0..1]
         return self.network(x)
+    

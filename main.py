@@ -16,7 +16,7 @@ from QNN import NeuralNetwork
 # ======== always-on script (no argparse) ========
 BASE_EPISODES     = 2000
 TEST_EPISODES     = 20
-HIDDEN_SIZE       = 128      # QNN.NeuralNetwork(h_size=...)
+HIDDEN_SIZE       = 32      # QNN.NeuralNetwork(h_size=...)
 BASE_LR           = 1e-3
 BASE_BATCH        = 64
 BASE_GAMMA        = 0.99
@@ -26,7 +26,9 @@ MAX_STEPS         = 50       # hard cap per episode (as requested)
 
 LR_SWEEP          = [1e-1, 1e-3, 1e-5]
 BATCH_SWEEP       = [8, 32, 256]
-GAMMA_SWEEP       = [0.99, 0.95, 0.5]
+GAMMA_SWEEP       = [0.99, 0.5, 0.1]
+HSIZE_SWEEP       = [2, 16, 4096]
+
 # =================================================
 
 
@@ -76,6 +78,7 @@ class DQNConfig:
     epsilon_end: float = 0.05
     epsilon_decay_steps: int = 8000
     target_update_every: int = 500
+    tau: float = 0.005
     max_steps_per_episode: int = MAX_STEPS  # 50-step cap per episode
     train_episodes: int = BASE_EPISODES
     test_episodes: int = TEST_EPISODES
@@ -161,8 +164,12 @@ class DQNAgent:
 
         self.global_step += 1
         self.eps_step += 1
-        if self.global_step % self.cfg.target_update_every == 0:
-            self.target_net.load_state_dict(self.q_net.state_dict())
+        
+        with torch.no_grad():
+            tau = self.cfg.tau
+            for tgt, src in zip(self.target_net.parameters(), self.q_net.parameters()):
+                tgt.data.mul_(1.0 - tau).add_(tau * src.data)
+
 
         return float(loss.item())
 
@@ -344,9 +351,11 @@ def main():
     plot_policy_arrows(agent, GridWorld(penalty=PENALTY, start_state=START_STATE))
 
     # Three consolidated sweep plots (all runs on one figure each)
-    sweep_and_plot(base_cfg, PENALTY, START_STATE, "lr",         LR_SWEEP,    "curves_lr.png")
-    sweep_and_plot(base_cfg, PENALTY, START_STATE, "batch_size", BATCH_SWEEP, "curves_batch.png")
-    sweep_and_plot(base_cfg, PENALTY, START_STATE, "gamma",      GAMMA_SWEEP, "curves_gamma.png")
+    # sweep_and_plot(base_cfg, PENALTY, START_STATE, "lr",         LR_SWEEP,    "curves_lr.png")
+    # sweep_and_plot(base_cfg, PENALTY, START_STATE, "batch_size", BATCH_SWEEP, "curves_batch.png")
+    # sweep_and_plot(base_cfg, PENALTY, START_STATE, "gamma",      GAMMA_SWEEP, "curves_gamma.png")
+    sweep_and_plot(base_cfg, PENALTY, START_STATE, "hidden_size", HSIZE_SWEEP, "curves_hsize.png")
+
 
     print("\nSaved: training_curves.png, policy_arrows.png, curves_lr.png, curves_batch.png, curves_gamma.png")
 
