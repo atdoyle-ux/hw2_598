@@ -13,20 +13,21 @@ from Graph import GridWorld
 from QNN import NeuralNetwork
 
 
-# ======== tweakables (always-on script; no argparse) ========
+# ======== always-on script (no argparse) ========
 BASE_EPISODES     = 1000
 TEST_EPISODES     = 20
-HIDDEN_SIZE       = 64
+HIDDEN_SIZE       = 128      # QNN.NeuralNetwork(h_size=...)
 BASE_LR           = 1e-3
 BASE_BATCH        = 64
 BASE_GAMMA        = 0.99
 PENALTY           = -1.0
 START_STATE       = (0, 0)
+MAX_STEPS         = 50       # hard cap per episode (as requested)
 
 LR_SWEEP          = [1e-2, 1e-3, 1e-5]
 BATCH_SWEEP       = [8, 32, 256]
 GAMMA_SWEEP       = [0.99, 0.95, 0.5]
-# ============================================================
+# =================================================
 
 
 def set_seed(seed: int = 42):
@@ -43,6 +44,27 @@ def to_2d_state_vec(state: Tuple[int, int], rows: int, cols: int) -> np.ndarray:
     return np.array([r_norm, c_norm], dtype=np.float32)
 
 
+# ---------- plotting helpers (cleaner figs) ----------
+def _smooth_ma(y, frac: float = 0.015) -> np.ndarray:
+    """Moving average; window = ~1.5% of length, clamped to [5, 200]."""
+    y = np.asarray(y, dtype=float)
+    if y.size == 0:
+        return y
+    win = int(max(5, min(200, round(y.size * frac))))
+    if win <= 1 or win > y.size:
+        return y
+    kernel = np.ones(win, dtype=float) / win
+    return np.convolve(y, kernel, mode="valid")
+
+
+def _pretty_axes(ax, title: str, xlabel: str = "Episode", ylabel: str = "Return"):
+    ax.set_title(title, fontsize=12)
+    ax.set_xlabel(xlabel, fontsize=11)
+    ax.set_ylabel(ylabel, fontsize=11)
+    ax.grid(True, alpha=0.3, linewidth=0.8)
+# -----------------------------------------------------
+
+
 @dataclass
 class DQNConfig:
     gamma: float = BASE_GAMMA
@@ -54,7 +76,7 @@ class DQNConfig:
     epsilon_end: float = 0.05
     epsilon_decay_steps: int = 8000
     target_update_every: int = 500
-    max_steps_per_episode: int = 200
+    max_steps_per_episode: int = MAX_STEPS  # 50-step cap per episode
     train_episodes: int = BASE_EPISODES
     test_episodes: int = TEST_EPISODES
     seed: int = 42
@@ -84,7 +106,7 @@ class DQNAgent:
         self.device = torch.device(cfg.device)
         self.n_actions = n_actions
 
-        # IMPORTANT: use your new hidden size
+        # Use your updated QNN with hidden_size
         self.q_net = NeuralNetwork(h_size=cfg.hidden_size).to(self.device)
         self.target_net = NeuralNetwork(h_size=cfg.hidden_size).to(self.device)
         self.target_net.load_state_dict(self.q_net.state_dict())
@@ -193,25 +215,24 @@ def train_and_test(penalty: float, start_state: Tuple[int, int], cfg: DQNConfig)
             print(f"Episode {ep:4d}: return={ep_ret:7.3f}  steps={ep_steps:3d}  "
                   f"avg100={avg100:7.3f}  eps={agent.epsilon():.3f}  loss(avg50)={avg_loss:.5f}")
 
-    # quick artifact (kept)
+    # === Clean training curves (smoothed only) ===
+    plt.rcParams.update({"figure.dpi": 140})
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-    ax1.plot(rewards, alpha=0.7, label="Episode Return")
-    if len(rewards) > 10:
-        win = 20
-        smooth_r = np.convolve(rewards, np.ones(win)/win, mode='valid')
-        ax1.plot(range(win-1, len(smooth_r)+win-1), smooth_r, linewidth=2, label=f"{win}-ep avg")
-    ax1.set_title("DQN Episode Rewards")
-    ax1.set_xlabel("Episode"); ax1.set_ylabel("Return"); ax1.legend()
 
-    ax2.plot(losses, alpha=0.6, label="Episode Loss")
-    if len(losses) > 10:
-        win = 20
-        smooth_l = np.convolve([l for l in losses if not np.isnan(l)], np.ones(win)/win, mode='valid')
-        ax2.plot(range(win-1, len(smooth_l)+win-1), smooth_l, linewidth=2, label=f"{win}-ep avg")
-    ax2.set_title("DQN Training Loss")
-    ax2.set_xlabel("Episode"); ax2.set_ylabel("Loss"); ax2.legend()
+    r_sm = _smooth_ma(rewards, frac=0.015)
+    ax1.plot(range(len(r_sm)), r_sm, linewidth=2, label="Reward (MA)")
+    _pretty_axes(ax1, "DQN Episode Rewards (smoothed)")
+    ax1.legend()
+
+    losses_clean = [l for l in losses if not (l is None or np.isnan(l))]
+    if len(losses_clean) > 0:
+        l_sm = _smooth_ma(losses_clean, frac=0.03)
+        ax2.plot(range(len(l_sm)), l_sm, linewidth=2, label="Loss (MA)")
+    _pretty_axes(ax2, "DQN Training Loss (smoothed)", ylabel="Loss")
+    ax2.legend()
+
     plt.tight_layout()
-    plt.savefig("training_curves.png")
+    plt.savefig("training_curves.png", bbox_inches="tight")
     plt.close(fig)
 
     # Greedy test
@@ -229,6 +250,7 @@ def train_and_test(penalty: float, start_state: Tuple[int, int], cfg: DQNConfig)
 
 @torch.no_grad()
 def plot_policy_arrows(agent: DQNAgent, env: GridWorld, filename: str = "policy_arrows.png"):
+    """Argmax(Q) arrow in each non-terminal cell; row 0 rendered at bottom."""
     grid = env.grid
     rows, cols = grid.shape
     fig, ax = plt.subplots(figsize=(6, 4))
@@ -236,7 +258,7 @@ def plot_policy_arrows(agent: DQNAgent, env: GridWorld, filename: str = "policy_
     base = np.where(np.isnan(grid), np.nan, 0.0)
     ax.imshow(base, cmap=plt.cm.Greys, vmin=0, vmax=1)
 
-    # grid lines
+    # cell borders
     for r in range(rows + 1):
         ax.axhline(r - 0.5, color='k', linewidth=0.5)
     for c in range(cols + 1):
@@ -248,62 +270,71 @@ def plot_policy_arrows(agent: DQNAgent, env: GridWorld, filename: str = "policy_
             val = grid[r, c]
             if np.isnan(val):
                 continue
-            center = (c, r)
+            cx, cy = (c, r)
 
+            # Terminals: label G / P
             if val == 1.0:
-                ax.text(center[0], center[1], "G", ha='center', va='center', fontsize=16, fontweight='bold', color='green')
+                ax.text(cx, cy, "G", ha='center', va='center', fontsize=16, fontweight='bold', color='green')
                 continue
             if val < 0 and val != 0.0:
-                ax.text(center[0], center[1], "P", ha='center', va='center', fontsize=16, fontweight='bold', color='red')
+                ax.text(cx, cy, "P", ha='center', va='center', fontsize=16, fontweight='bold', color='red')
                 continue
 
+            # Non-terminal: arrow = argmax Q
             s_vec = to_2d_state_vec((r, c), rows, cols)
             s_t = torch.tensor(s_vec[None, :], dtype=torch.float32, device=agent.device)
             q = agent.q_net(s_t).cpu().numpy().squeeze()
             a = int(np.argmax(q))
-            ax.text(center[0], center[1], arrows[a], ha='center', va='center', fontsize=16)
+            ax.text(cx, cy, arrows[a], ha='center', va='center', fontsize=16)
 
     ax.set_title("Policy (argmax Q) by cell")
     ax.set_xticks(range(cols)); ax.set_yticks(range(rows))
+    # Flip vertical so row 0 is bottom, row (rows-1) is top
     ax.set_xlim(-0.5, cols - 0.5)
-    ax.set_ylim(-0.5, rows - 0.5)  # flips vertically so 0 is bottom, max row on top
-
+    ax.set_ylim(-0.5, rows - 0.5)
     plt.tight_layout()
-    plt.savefig(filename)
+    plt.savefig(filename, bbox_inches="tight")
     plt.close(fig)
 
 
 def sweep_and_plot(base_cfg: DQNConfig, penalty: float, start_state: Tuple[int, int],
                    param_name: str, values: Sequence, out_file: str):
-    """Run a separate training for each value, plot ALL reward curves on one figure."""
-    fig, ax = plt.subplots(figsize=(8, 5))
-    first_agent = None
+    """Run separate trainings for each value, plot ALL reward curves on ONE figure."""
+    plt.rcParams.update({"figure.dpi": 140})
+    fig, ax = plt.subplots(figsize=(8.5, 5.0))
 
+    first_agent = None
     for v in values:
         cfg = DQNConfig(**vars(base_cfg))
         setattr(cfg, param_name, v)
+
         print(f"\n=== SWEEP {param_name}={v} ===")
         agent, rewards = train_and_test(penalty=penalty, start_state=start_state, cfg=cfg)
+        if first_agent is None:
+            first_agent = agent  # representative for policy snapshot
 
-        x = np.arange(1, len(rewards) + 1)
-        ax.plot(x, rewards, alpha=0.35, label=f"{param_name}={v}")
+        # --- Plot only ONE clean line per hyperparameter value ---
         if len(rewards) > 20:
             win = max(5, min(50, len(rewards)//20))
             sm = np.convolve(rewards, np.ones(win)/win, mode='valid')
-            ax.plot(np.arange(win, len(rewards)+1), sm, linewidth=2)
+            ax.plot(np.arange(win, len(rewards)+1), sm, linewidth=2, label=f"{param_name}={v}")
+        else:
+            ax.plot(np.arange(len(rewards)), rewards, linewidth=2, label=f"{param_name}={v}")
 
-        if first_agent is None:
-            first_agent = agent  # representative for policy plot
-
+    # Save one policy diagram from the first run
     if first_agent is not None:
         plot_policy_arrows(first_agent, GridWorld(penalty=penalty, start_state=start_state), filename="policy_arrows.png")
 
     ax.set_title(f"Rewards vs Episode — varying {param_name}")
-    ax.set_xlabel("Episode"); ax.set_ylabel("Return")
-    ax.legend()
+    ax.set_xlabel("Episode")
+    ax.set_ylabel("Return")
+    ax.grid(True, alpha=0.3, linewidth=0.8)
+    ax.legend(title=param_name, frameon=True)
+
     plt.tight_layout()
-    plt.savefig(out_file)
+    plt.savefig(out_file, bbox_inches="tight")
     plt.close(fig)
+
 
 
 def main():
@@ -312,7 +343,7 @@ def main():
     agent, _ = train_and_test(penalty=PENALTY, start_state=START_STATE, cfg=base_cfg)
     plot_policy_arrows(agent, GridWorld(penalty=PENALTY, start_state=START_STATE))
 
-    # Always run the three requested one-figure plots
+    # Three consolidated sweep plots (all runs on one figure each)
     sweep_and_plot(base_cfg, PENALTY, START_STATE, "lr",         LR_SWEEP,    "curves_lr.png")
     sweep_and_plot(base_cfg, PENALTY, START_STATE, "batch_size", BATCH_SWEEP, "curves_batch.png")
     sweep_and_plot(base_cfg, PENALTY, START_STATE, "gamma",      GAMMA_SWEEP, "curves_gamma.png")
