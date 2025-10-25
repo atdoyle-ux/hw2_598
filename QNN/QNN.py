@@ -5,12 +5,20 @@ class NeuralNetwork(nn.Module):
     def __init__(self):
         super().__init__()
         in_size = 2
-        h_size = 128
+        h_size = 1024
         out_size = 4
         self.network = nn.Sequential(
             nn.Linear(in_size, h_size),
+            nn.Dropout(0.05),
             nn.ReLU(),
-            nn.Linear(h_size, h_size),
+            nn.Linear(h_size,h_size*2),
+            nn.Dropout(0.05),
+            nn.GELU(),
+            nn.Linear(h_size*2, h_size*2),
+            nn.Dropout(0.05),
+            nn.GELU(),
+            nn.Linear(h_size*2, h_size),
+            nn.Dropout(0.05),
             nn.ReLU(),
             nn.Linear(h_size, out_size),
         )
